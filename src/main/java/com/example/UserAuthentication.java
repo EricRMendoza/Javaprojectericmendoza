@@ -58,7 +58,18 @@ public class UserAuthentication {
                     "FOREIGN KEY(transferFromID) REFERENCES users(id) ON DELETE CASCADE," +
                     "FOREIGN KEY(transferToID) REFERENCES users(id) ON DELETE CASCADE" +
                     ")";
-            stmt.execute(txnSql);
+            stmt.execute("CREATE TABLE IF NOT EXISTS \"transaction\" (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "amount REAL NOT NULL," +
+                    "name TEXT NOT NULL," +
+                    "account_ID INTEGER NOT NULL," +
+                    "date TEXT DEFAULT CURRENT_TIMESTAMP," +
+                    "transferFromID INTEGER," +
+                    "transferToID INTEGER," +
+                    "FOREIGN KEY(account_ID) REFERENCES users(id) ON DELETE CASCADE," +
+                    "FOREIGN KEY(transferFromID) REFERENCES users(id) ON DELETE CASCADE," +
+                    "FOREIGN KEY(transferToID) REFERENCES users(id) ON DELETE CASCADE" +
+                    ")");
 
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Database initialization error", e);

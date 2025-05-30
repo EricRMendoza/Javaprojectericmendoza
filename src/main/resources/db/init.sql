@@ -1,7 +1,6 @@
--- resources/db/init.sql
-DB_URL=jdbc:sqlite:/absolute/path/to/gcash.db
 PRAGMA foreign_keys = ON;
 
+-- USERS TABLE
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -10,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     pin TEXT NOT NULL
 );
 
+-- BALANCE TABLE
 CREATE TABLE IF NOT EXISTS balance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     amount REAL NOT NULL DEFAULT 0.0,
@@ -17,10 +17,11 @@ CREATE TABLE IF NOT EXISTS balance (
     FOREIGN KEY(user_ID) REFERENCES users(id)
 );
 
-CREATE TABLE IF NOT EXISTS transaction (
+-- TRANSACTIONS TABLE
+CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     amount REAL NOT NULL,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL,  -- e.g., 'CashIn', 'Transfer'
     account_ID INTEGER NOT NULL,
     date TEXT DEFAULT CURRENT_TIMESTAMP,
     transferFromID INTEGER,
@@ -29,3 +30,4 @@ CREATE TABLE IF NOT EXISTS transaction (
     FOREIGN KEY(transferFromID) REFERENCES users(id),
     FOREIGN KEY(transferToID) REFERENCES users(id)
 );
+✅ Update Your J

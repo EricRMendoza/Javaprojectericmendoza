@@ -5,7 +5,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class CashTransfer {
-    // Force the SQLite JDBC driver to load
     static {
         try {
             Class.forName("org.sqlite.JDBC");
@@ -15,7 +14,6 @@ public class CashTransfer {
         }
     }
 
-    // Use DB_URL from environment, or fallback to "jdbc:sqlite:gcash.db"
     private static final String DB_URL = System.getenv("DB_URL") != null
             ? System.getenv("DB_URL")
             : "jdbc:sqlite:gcash.db";
@@ -23,88 +21,100 @@ public class CashTransfer {
     private static final Logger logger = Logger.getLogger(CashTransfer.class.getName());
 
     /**
-     * Transfers the specified amount from fromUserId to toUserId.
+     * Transfers amount from userId to toUserId.
      * Returns true if successful, false otherwise.
      */
-    public boolean cashTransfer(int fromUserId, int toUserId, double amount) {
-        // Validate inputs
-        if (fromUserId == toUserId) {
+    public boolean cashTransfer(int userId, int toUserId, double amount) {
+        if (amount <= 0) {
+            System.out.println("Invalid amount. Transfer amount must be greater than zero.");
+            return false;
+        }
+        if (userId == toUserId) {
             System.out.println("Cannot transfer to the same account.");
             return false;
         }
-        if (amount <= 0) {
-            System.out.println("Transfer amount must be greater than 0.");
-            return false;
-        }
 
-        // SQL statements
         String selectBalanceSql = "SELECT amount FROM balance WHERE user_ID = ?";
-        String deductSql = "UPDATE balance SET amount = amount - ? WHERE user_ID = ?";
-        String addSql = "UPDATE balance SET amount = amount + ? WHERE user_ID = ?";
-        String insertBalanceForReceiverSql = "INSERT INTO balance (amount, user_ID) VALUES (?, ?)";
-        String insertTxnSql = "INSERT INTO transaction (amount, name, account_ID, date, transferFromID, transferToID) " +
-                "VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)";
+        String updateBalanceSql = "UPDATE balance SET amount = ? WHERE user_ID = ?";
+        String insertBalanceSql = "INSERT INTO balance (amount, user_ID) VALUES (?, ?)";
+        String insertTxnSql = "INSERT INTO \"transaction\" (amount, name, account_ID, transferFromID, transferToID, date) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (Connection conn = DriverManager.getConnection(DB_URL)) {
             conn.setAutoCommit(false);
 
-            // 1) Check sender’s balance
-            double senderBalance;
-            try (PreparedStatement selectStmt = conn.prepareStatement(selectBalanceSql)) {
-                selectStmt.setInt(1, fromUserId);
-                try (ResultSet rs = selectStmt.executeQuery()) {
+            double fromBalance;
+
+            // Check sender's balance
+            try (PreparedStatement pstmt = conn.prepareStatement(selectBalanceSql)) {
+                pstmt.setInt(1, userId);
+                try (ResultSet rs = pstmt.executeQuery()) {
                     if (rs.next()) {
-                        senderBalance = rs.getDouble("amount");
+                        fromBalance = rs.getDouble("amount");
                     } else {
                         System.out.println("Sender has no balance record.");
+                        conn.rollback();
                         return false;
                     }
                 }
             }
-            if (senderBalance < amount) {
-                System.out.println("Insufficient balance to transfer.");
+
+            if (fromBalance < amount) {
+                System.out.println("Insufficient balance.");
+                conn.rollback();
                 return false;
             }
 
-            // 2) Deduct from sender
-            try (PreparedStatement deductStmt = conn.prepareStatement(deductSql)) {
-                deductStmt.setDouble(1, amount);
-                deductStmt.setInt(2, fromUserId);
-                deductStmt.executeUpdate();
+            // Deduct from sender
+            double newFromBalance = fromBalance - amount;
+            try (PreparedStatement pstmt = conn.prepareStatement(updateBalanceSql)) {
+                pstmt.setDouble(1, newFromBalance);
+                pstmt.setInt(2, userId);
+                pstmt.executeUpdate();
             }
 
-            // 3) Add to receiver (or insert a new balance record if none exists)
-            int rowsAdded;
-            try (PreparedStatement addStmt = conn.prepareStatement(addSql)) {
-                addStmt.setDouble(1, amount);
-                addStmt.setInt(2, toUserId);
-                rowsAdded = addStmt.executeUpdate();
-            }
-            if (rowsAdded == 0) {
-                try (PreparedStatement insertStmt = conn.prepareStatement(insertBalanceForReceiverSql)) {
-                    insertStmt.setDouble(1, amount);
-                    insertStmt.setInt(2, toUserId);
-                    insertStmt.executeUpdate();
+            // Add to receiver balance (insert if missing)
+            double toBalance = 0;
+            boolean toUserHasBalance = false;
+            try (PreparedStatement pstmt = conn.prepareStatement(selectBalanceSql)) {
+                pstmt.setInt(1, toUserId);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        toBalance = rs.getDouble("amount");
+                        toUserHasBalance = true;
+                    }
                 }
             }
 
-            // 4) Record transaction
-            try (PreparedStatement txnStmt = conn.prepareStatement(insertTxnSql)) {
-                txnStmt.setDouble(1, amount);
-                txnStmt.setString(2, "Transfer");
-                txnStmt.setInt(3, fromUserId);
-                txnStmt.setInt(4, fromUserId);
-                txnStmt.setInt(5, toUserId);
-                txnStmt.executeUpdate();
+            if (toUserHasBalance) {
+                try (PreparedStatement pstmt = conn.prepareStatement(updateBalanceSql)) {
+                    pstmt.setDouble(1, toBalance + amount);
+                    pstmt.setInt(2, toUserId);
+                    pstmt.executeUpdate();
+                }
+            } else {
+                try (PreparedStatement pstmt = conn.prepareStatement(insertBalanceSql)) {
+                    pstmt.setDouble(1, amount);
+                    pstmt.setInt(2, toUserId);
+                    pstmt.executeUpdate();
+                }
+            }
+
+            // Record the transaction
+            try (PreparedStatement pstmt = conn.prepareStatement(insertTxnSql)) {
+                pstmt.setDouble(1, amount);
+                pstmt.setString(2, "Transfer");
+                pstmt.setInt(3, userId);
+                pstmt.setInt(4, userId);
+                pstmt.setInt(5, toUserId);
+                pstmt.executeUpdate();
             }
 
             conn.commit();
-            System.out.println("Transfer successful: ₱" + String.format("%.2f", amount)
-                    + " sent to user ID " + toUserId);
+            System.out.printf("Transfer successful: ₱%.2f transferred from User %d to User %d%n", amount, userId, toUserId);
             return true;
 
         } catch (SQLException e) {
-            logger.log(Level.SEVERE, "Error during transfer from " + fromUserId + " to " + toUserId, e);
+            logger.log(Level.SEVERE, "Error during transfer from " + userId + " to " + toUserId, e);
             return false;
         }
     }
